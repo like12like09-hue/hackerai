@@ -33,6 +33,8 @@ jobs:
           targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
 
       - name: Install Project Dependencies
+        run: pnpm install --no-frozen-lockfile
+        
         run: pnpm install
 
       - name: Inject Secure Environment Variables
@@ -44,7 +46,8 @@ jobs:
           echo "WORKOS_API_KEY=${{ secrets.WORKOS_API }}" >> .env
 
       - name: Build Android APK (Debug)
-        run: pnpm tauri android build --debug
+        run: pnpm exec tauri android build --debug
+
 
       - name: Upload Final APK
         uses: actions/upload-artifact@v4
