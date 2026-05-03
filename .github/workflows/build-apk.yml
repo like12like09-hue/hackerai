@@ -32,6 +32,11 @@ jobs:
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
 
+      - name: Install System Tools for OpenSSL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev perl
+
       - name: Install Project Dependencies
         run: pnpm install --no-frozen-lockfile
 
@@ -43,6 +48,10 @@ jobs:
           echo "WORKOS_CLIENT_ID=${{ secrets.WORKOS_CLIENT }}" >> .env
           echo "WORKOS_API_KEY=${{ secrets.WORKOS_API }}" >> .env
           cp .env packages/desktop/.env
+
+      - name: Force Vendored OpenSSL for Android
+        working-directory: ./packages/desktop/src-tauri
+        run: cargo add openssl --features vendored
 
       - name: Auto-Fix Versions & Build Android APK
         working-directory: ./packages/desktop
