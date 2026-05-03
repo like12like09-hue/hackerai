@@ -42,15 +42,14 @@ jobs:
           echo "NEXT_PUBLIC_CONVEX_URL=${{ secrets.CONVEX_URL }}" >> .env
           echo "WORKOS_CLIENT_ID=${{ secrets.WORKOS_CLIENT }}" >> .env
           echo "WORKOS_API_KEY=${{ secrets.WORKOS_API }}" >> .env
+          cp .env packages/desktop/.env
 
-      - name: Install Tauri CLI Globally
-        run: npm install -g @tauri-apps/cli
-
-      - name: Initialize and Build Android APK
+      - name: Auto-Fix Versions & Build Android APK
         working-directory: ./packages/desktop
         run: |
-          tauri android init
-          tauri android build --debug
+          cd src-tauri && cargo update && cd ..
+          pnpm exec tauri android init
+          pnpm exec tauri android build --debug
 
       - name: Upload Final APK
         uses: actions/upload-artifact@v4
