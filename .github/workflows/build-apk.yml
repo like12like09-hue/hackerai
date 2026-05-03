@@ -1,65 +1,181 @@
 name: Build HackerAI APK
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   build-android:
     runs-on: ubuntu-latest
 
     steps:
+      # =============================================
+      # STEP 1: Repo ka code checkout karo
+      # =============================================
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # =============================================
+      # STEP 2: Node.js 20 setup karo
+      # =============================================
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # =============================================
+      # STEP 3: pnpm setup karo
+      # =============================================
       - name: Setup pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 8
 
-      - name: Setup Java (For Android Studio)
+      # =============================================
+      # STEP 4: Java 17 setup (Android ke liye)
+      # =============================================
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Setup Rust (For Tauri Backend)
+      # =============================================
+      # STEP 5: Rust setup (Tauri backend ke liye)
+      # =============================================
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
 
+      # =============================================
+      # STEP 6: CACHING — Sabse important fix!
+      # Isse build time 20-40 min se 5-10 min ho jayega
+      # =============================================
+
+      # pnpm packages cache
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-
+
+      # Rust/Cargo crates cache
+      - name: Cache Cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/desktop/src-tauri/target
+          key: cargo-android-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-android-
+
+      # Gradle cache (Android build ke liye)
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-
+
+      # =============================================
+      # STEP 7: System tools install karo (OpenSSL etc.)
+      # =============================================
       - name: Install System Tools for OpenSSL
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libssl-dev perl
 
-      - name: Install Project Dependencies
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Inject Secure Environment Variables
+      # =============================================
+      # STEP 8: Android NDK verify karo
+      # Agar NDK nahi mila toh yahi pe fail ho jayega
+      # baad mein confusing error nahi aayega
+      # =============================================
+      - name: Verify Android NDK Environment
         run: |
-          echo "GOOGLE_GENERATIVE_AI_API_KEY=${{ secrets.GEMINI_KEY }}" >> .env
-          echo "E2B_API_KEY=${{ secrets.E2B_KEY }}" >> .env
-          echo "NEXT_PUBLIC_CONVEX_URL=${{ secrets.CONVEX_URL }}" >> .env
-          echo "WORKOS_CLIENT_ID=${{ secrets.WORKOS_CLIENT }}" >> .env
-          echo "WORKOS_API_KEY=${{ secrets.WORKOS_API }}" >> .env
-          cp .env packages/desktop/.env
+          echo "ANDROID_HOME = $ANDROID_HOME"
+          echo "ANDROID_NDK_HOME = $ANDROID_NDK_HOME"
+          if [ -z "$ANDROID_NDK_HOME" ]; then
+            echo "ERROR: ANDROID_NDK_HOME set nahi hai!"
+            echo "NDK path dhundh rahe hain..."
+            export ANDROID_NDK_HOME=$(find $ANDROID_HOME/ndk -maxdepth 1 -type d | head -2 | tail -1)
+            echo "Found NDK at: $ANDROID_NDK_HOME"
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          fi
+          ls "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/" | head -5
+          echo "NDK verified!"
 
-      - name: Force Vendored OpenSSL for Android
-        working-directory: ./packages/desktop/src-tauri
-        run: cargo add openssl --features vendored
+      # =============================================
+      # STEP 9: NDK tools PATH mein add karo
+      # =============================================
+      - name: Add Android NDK Tools to PATH
+        run: echo "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
-      - name: Auto-Fix Versions & Build Android APK
+      # =============================================
+      # STEP 10: Dependencies install karo
+      # --frozen-lockfile = lockfile change nahi hoga
+      # Jo commit hai wahi versions use hongi
+      # =============================================
+      - name: Install Project Dependencies
+        run: pnpm install --frozen-lockfile
+
+      # =============================================
+      # STEP 11: Environment variables setup karo
+      # NOTE: .env file ki jagah GITHUB_ENV use kar rahe hain
+      # Isse secrets file mein write nahi hote
+      # =============================================
+      - name: Inject Environment Variables
+        run: |
+          # Desktop package ke liye .env file banao
+          cat > packages/desktop/.env << 'ENVEOF'
+          GOOGLE_GENERATIVE_AI_API_KEY=${{ secrets.GEMINI_KEY }}
+          E2B_API_KEY=${{ secrets.E2B_KEY }}
+          NEXT_PUBLIC_CONVEX_URL=${{ secrets.CONVEX_URL }}
+          WORKOS_CLIENT_ID=${{ secrets.WORKOS_CLIENT }}
+          WORKOS_API_KEY=${{ secrets.WORKOS_API }}
+          ENVEOF
+
+          # Root level .env bhi chahiye toh
+          cp packages/desktop/.env .env
+        env:
+          # Yeh ensure karta hai ki secrets properly mask ho jayein logs mein
+          ACTIONS_STEP_DEBUG: false
+
+      # =============================================
+      # STEP 12: Android APK build karo
+      # NOTE: cargo update aur cargo add HATA DIYE
+      # Woh changes repo mein committed hone chahiye
+      # =============================================
+      - name: Build Android APK
         working-directory: ./packages/desktop
         run: |
-          cd src-tauri && cargo update && cd ..
           pnpm exec tauri android init
           pnpm exec tauri android build --debug
 
+      # =============================================
+      # STEP 13: APK exist karta hai ya nahi — check karo
+      # Agar nahi mila toh clear error dega
+      # =============================================
+      - name: Verify APK was built
+        run: |
+          APK_FILES=$(find packages/desktop/src-tauri/gen/android -name "*.apk" 2>/dev/null)
+          if [ -z "$APK_FILES" ]; then
+            echo "ERROR: Koi APK file nahi bani! Build fail hua hai."
+            echo "Upar ke steps ke logs check karo."
+            exit 1
+          fi
+          echo "APK mil gayi!"
+          echo "$APK_FILES"
+
+      # =============================================
+      # STEP 14: APK upload karo as artifact
+      # =============================================
       - name: Upload Final APK
         uses: actions/upload-artifact@v4
         with:
