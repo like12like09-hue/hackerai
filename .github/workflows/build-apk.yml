@@ -34,8 +34,6 @@ jobs:
 
       - name: Install Project Dependencies
         run: pnpm install --no-frozen-lockfile
-        
-        run: pnpm install
 
       - name: Inject Secure Environment Variables
         run: |
@@ -48,9 +46,9 @@ jobs:
       - name: Build Android APK (Debug)
         run: pnpm exec tauri android build --debug
 
-
       - name: Upload Final APK
         uses: actions/upload-artifact@v4
         with:
           name: HackerAI-Android-App
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          
